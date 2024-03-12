@@ -68,8 +68,8 @@ def main(cfg: DictConfig):
 
     assert cfg.method in METHODS, f"Choose from {METHODS.keys()}"
 
-    if cfg.data.num_large_crops != 2:
-        assert cfg.method in ["wmse", "mae"]
+    # if cfg.data.num_large_crops != 2:
+    #     assert cfg.method in ["wmse", "mae"]
 
     model = METHODS[cfg.method](cfg)
     make_contiguous(model)

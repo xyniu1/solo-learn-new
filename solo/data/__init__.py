@@ -18,11 +18,12 @@
 # DEALINGS IN THE SOFTWARE.
 
 
-from solo.data import classification_dataloader, pretrain_dataloader
+from solo.data import classification_dataloader, pretrain_dataloader, aug_straight
 
 __all__ = [
     "classification_dataloader",
     "pretrain_dataloader",
+    "aug_straight",
 ]
 
 

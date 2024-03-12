@@ -38,6 +38,7 @@ from solo.methods.vibcreg import VIbCReg
 from solo.methods.vicreg import VICReg
 from solo.methods.wmse import WMSE
 from solo.methods.all4one import All4One
+from solo.methods.straight import Straight
 
 
 METHODS = {
@@ -64,6 +65,7 @@ METHODS = {
     "vicreg": VICReg,
     "wmse": WMSE,
     "all4one": All4One,
+    "straight": Straight,
 }
 __all__ = [
     "BarlowTwins",
@@ -87,4 +89,5 @@ __all__ = [
     "VICReg",
     "WMSE",
     "All4One",
+    "Straight",
 ]

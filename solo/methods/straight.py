@@ -22,20 +22,19 @@ from typing import Any, Dict, List, Sequence
 import omegaconf
 import torch
 import torch.nn as nn
-from solo.losses.vicreg import vicreg_loss_func
+from solo.losses.straight import straight_loss_func
 from solo.methods.base import BaseMethod
 from solo.utils.misc import omegaconf_select
-import random
 
 
-class VICReg(BaseMethod):
+class Straight(BaseMethod):
     def __init__(self, cfg: omegaconf.DictConfig):
-        """Implements VICReg (https://arxiv.org/abs/2105.04906)
-
+        """
         Extra cfg settings:
             method_kwargs:
                 proj_output_dim (int): number of dimensions of the projected features.
                 proj_hidden_dim (int): number of neurons in the hidden layers of the projector.
+                straight_loss_weight (float): weight of the straightness term.
                 sim_loss_weight (float): weight of the invariance term.
                 var_loss_weight (float): weight of the variance term.
                 cov_loss_weight (float): weight of the covariance term.
@@ -43,6 +42,7 @@ class VICReg(BaseMethod):
 
         super().__init__(cfg)
 
+        self.straight_loss_weight: float = cfg.method_kwargs.straight_loss_weight
         self.sim_loss_weight: float = cfg.method_kwargs.sim_loss_weight
         self.var_loss_weight: float = cfg.method_kwargs.var_loss_weight
         self.cov_loss_weight: float = cfg.method_kwargs.cov_loss_weight
@@ -51,6 +51,9 @@ class VICReg(BaseMethod):
         proj_output_dim: int = cfg.method_kwargs.proj_output_dim
         
         self.sequence = cfg.method_kwargs.sequence
+        self.multi_layer = cfg.method_kwargs.multi_layer
+        if self.multi_layer:
+            self.layers = cfg.method_kwargs.layers
 
         # projector
         self.projector = nn.Sequential(
@@ -74,20 +77,25 @@ class VICReg(BaseMethod):
             omegaconf.DictConfig: same as the argument, used to avoid errors.
         """
 
-        cfg = super(VICReg, VICReg).add_and_assert_specific_cfg(cfg)
+        cfg = super(Straight, Straight).add_and_assert_specific_cfg(cfg)
 
         assert not omegaconf.OmegaConf.is_missing(cfg, "method_kwargs.proj_output_dim")
         assert not omegaconf.OmegaConf.is_missing(cfg, "method_kwargs.proj_hidden_dim")
 
+        cfg.method_kwargs.straight_loss_weight = omegaconf_select(
+            cfg,
+            "method_kwargs.straight_loss_weight",
+            5.0,
+        )
         cfg.method_kwargs.sim_loss_weight = omegaconf_select(
             cfg,
             "method_kwargs.sim_loss_weight",
-            25.0,
+            0.0,
         )
         cfg.method_kwargs.var_loss_weight = omegaconf_select(
             cfg,
             "method_kwargs.var_loss_weight",
-            25.0,
+            15.0,
         )
         cfg.method_kwargs.cov_loss_weight = omegaconf_select(
             cfg,
@@ -124,7 +132,7 @@ class VICReg(BaseMethod):
         return out
 
     def training_step(self, batch: Sequence[Any], batch_idx: int) -> torch.Tensor:
-        """Training step for VICReg reusing BaseMethod training step.
+        """Training step for Straight reusing BaseMethod training step.
 
         Args:
             batch (Sequence[Any]): a batch of data in the format of [img_indexes, [X], Y], where
@@ -132,29 +140,31 @@ class VICReg(BaseMethod):
             batch_idx (int): index of the batch.
 
         Returns:
-            torch.Tensor: total loss composed of VICReg loss and classification loss.
+            torch.Tensor: total loss composed of Straight loss and classification loss.
         """
 
         out = super().training_step(batch, batch_idx)
         class_loss = out["loss"]
-        if self.sequence:
-            z_list = out["z"]
-            z1, z2 = random.sample(z_list, 2) # without replacement
-        else:
-            z1, z2 = out["z"]
+        z_list = out["z"]
+        if self.multi_layer:
+            mid_layers = []
+            for layer in self.layers:
+                mid_layers.append(out['layer%d_out' % layer])
+        
 
-        # ------- vicreg loss -------
-        vicreg_loss, loss_log = vicreg_loss_func(
-            z1,
-            z2,
+        # ------- straight model loss -------
+        straight_model_loss, loss_log = straight_loss_func(
+            z_list, mid_layers,
+            straight_loss_weight=self.straight_loss_weight,
             sim_loss_weight=self.sim_loss_weight,
             var_loss_weight=self.var_loss_weight,
             cov_loss_weight=self.cov_loss_weight,
         )
 
-        self.log("train_vicreg_loss", vicreg_loss, on_epoch=True, sync_dist=True)
-        self.log('sim_loss', loss_log[0], on_epoch=True, sync_dist=True)
-        self.log('var_loss', loss_log[1], on_epoch=True, sync_dist=True)
-        self.log('cov_loss', loss_log[2], on_epoch=True, sync_dist=True)
+        self.log("train_straight_model_loss", straight_model_loss, on_epoch=True, sync_dist=True)
+        self.log('straight_loss', loss_log[0], on_epoch=True, sync_dist=True)
+        self.log('sim_loss', loss_log[1], on_epoch=True, sync_dist=True)
+        self.log('var_loss', loss_log[2], on_epoch=True, sync_dist=True)
+        self.log('cov_loss', loss_log[3], on_epoch=True, sync_dist=True)
 
-        return vicreg_loss + class_loss
+        return straight_model_loss + class_loss

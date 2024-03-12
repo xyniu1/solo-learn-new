@@ -429,9 +429,25 @@ class BaseMethod(pl.LightningModule):
 
         if not self.no_channel_last:
             X = X.to(memory_format=torch.channels_last)
-        feats = self.backbone(X)
-        logits = self.classifier(feats.detach())
-        return {"logits": logits, "feats": feats}
+        # the following lines only work for resnet-18
+        if hasattr(self, 'multi_layer') and self.multi_layer == True:
+            feats = self.backbone.conv1(X)
+            feats = self.backbone.bn1(feats)
+            feats = self.backbone.relu(feats)
+            feats = self.backbone.maxpool(feats)
+            layer1_out = self.backbone.layer1(feats)
+            layer2_out = self.backbone.layer2(layer1_out)
+            layer3_out = self.backbone.layer3(layer2_out)
+            layer4_out = self.backbone.layer4(layer3_out)
+            feats = self.backbone.avgpool(layer4_out)
+            feats = torch.flatten(feats, 1)
+            feats = self.backbone.fc(feats)
+            logits = self.classifier(feats.detach())
+            return {"logits": logits, "feats": feats, "layer1_out": layer1_out, "layer2_out": layer2_out, "layer3_out": layer3_out, "layer4_out": layer4_out}
+        else:            
+            feats = self.backbone(X)
+            logits = self.classifier(feats.detach())
+            return {"logits": logits, "feats": feats}
 
     def multicrop_forward(self, X: torch.tensor) -> Dict[str, Any]:
         """Basic multicrop forward method that performs the forward pass

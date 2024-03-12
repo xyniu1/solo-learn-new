@@ -31,6 +31,8 @@ from torch.utils.data.dataset import Dataset
 from torchvision import transforms
 from torchvision.datasets import STL10, ImageFolder
 
+from solo.data.aug_straight import *
+
 try:
     from solo.data.h5_dataset import H5Dataset
 except ImportError:
@@ -145,8 +147,11 @@ class NCropAugmentation:
         Returns:
             List[torch.Tensor]: an image in the tensor format.
         """
-
-        return [self.transform(x) for _ in range(self.num_crops)]
+        transformed_x = self.transform(x)
+        if isinstance(transformed_x, list) and len(transformed_x) == self.num_crops:
+            return transformed_x
+        else:
+            return [self.transform(x) for _ in range(self.num_crops)]
 
     def __repr__(self) -> str:
         return f"{self.num_crops} x [{self.transform}]"
@@ -216,54 +221,93 @@ def build_transform_pipeline(dataset, cfg):
     )
 
     augmentations = []
-    if cfg.rrc.enabled:
-        augmentations.append(
-            transforms.RandomResizedCrop(
+    if cfg.straight:
+        if cfg.straight_transform:
+            augmentations.append(StraightTransform(
                 cfg.crop_size,
-                scale=(cfg.rrc.crop_min_scale, cfg.rrc.crop_max_scale),
-                interpolation=transforms.InterpolationMode.BICUBIC,
-            ),
-        )
+                cfg.straight_transform.translation.scale_low, cfg.straight_transform.translation.scale_high,
+                cfg.straight_transform.tofro.scale_low, cfg.straight_transform.tofro.scale_high,
+                cfg.straight_transform.rotation.scale_low, cfg.straight_transform.rotation.scale_high,
+                cfg.straight_transform.translation.intensity,
+                cfg.straight_transform.tofro.intensity,
+                cfg.straight_transform.rotation.intensity,
+                cfg.straight_transform.t,
+                cfg.straight_transform.prob,
+            ))
+            
+        if cfg.color_jitter.prob:
+            augmentations.append(RandomColorJitter(
+                cfg.color_jitter.prob,
+                cfg.color_jitter.brightness,
+                cfg.color_jitter.contrast,
+                cfg.color_jitter.saturation,
+                cfg.color_jitter.hue,
+            ))
+            
+        if cfg.grayscale.prob:
+            augmentations.append(RandomGrayscale(cfg.grayscale.prob))
+            
+        if cfg.gaussian_blur.prob:
+            augmentations.append(RandomGaussianBlur(cfg.gaussian_blur.prob))
+            
+        if cfg.solarization.prob:
+            augmentations.append(RandomSolarization(cfg.solarization.prob))
+            
+        if cfg.horizontal_flip.prob:
+            augmentations.append(SameHorizontalFlip(cfg.horizontal_flip.prob))
+            
+        augmentations.append(ListtoTensor())
+        augmentations.append(ListNormalize(mean=mean, std=std))
+                        
     else:
-        augmentations.append(
-            transforms.Resize(
-                cfg.crop_size,
-                interpolation=transforms.InterpolationMode.BICUBIC,
-            ),
-        )
+        if cfg.rrc.enabled:
+            augmentations.append(
+                transforms.RandomResizedCrop(
+                    cfg.crop_size,
+                    scale=(cfg.rrc.crop_min_scale, cfg.rrc.crop_max_scale),
+                    interpolation=transforms.InterpolationMode.BICUBIC,
+                ),
+            )
+        else:
+            augmentations.append(
+                transforms.Resize(
+                    cfg.crop_size,
+                    interpolation=transforms.InterpolationMode.BICUBIC,
+                ),
+            )
 
-    if cfg.color_jitter.prob:
-        augmentations.append(
-            transforms.RandomApply(
-                [
-                    transforms.ColorJitter(
-                        cfg.color_jitter.brightness,
-                        cfg.color_jitter.contrast,
-                        cfg.color_jitter.saturation,
-                        cfg.color_jitter.hue,
-                    )
-                ],
-                p=cfg.color_jitter.prob,
-            ),
-        )
+        if cfg.color_jitter.prob:
+            augmentations.append(
+                transforms.RandomApply(
+                    [
+                        transforms.ColorJitter(
+                            cfg.color_jitter.brightness,
+                            cfg.color_jitter.contrast,
+                            cfg.color_jitter.saturation,
+                            cfg.color_jitter.hue,
+                        )
+                    ],
+                    p=cfg.color_jitter.prob,
+                ),
+            )
 
-    if cfg.grayscale.prob:
-        augmentations.append(transforms.RandomGrayscale(p=cfg.grayscale.prob))
+        if cfg.grayscale.prob:
+            augmentations.append(transforms.RandomGrayscale(p=cfg.grayscale.prob))
 
-    if cfg.gaussian_blur.prob:
-        augmentations.append(transforms.RandomApply([GaussianBlur()], p=cfg.gaussian_blur.prob))
+        if cfg.gaussian_blur.prob:
+            augmentations.append(transforms.RandomApply([GaussianBlur()], p=cfg.gaussian_blur.prob))
 
-    if cfg.solarization.prob:
-        augmentations.append(transforms.RandomApply([Solarization()], p=cfg.solarization.prob))
+        if cfg.solarization.prob:
+            augmentations.append(transforms.RandomApply([Solarization()], p=cfg.solarization.prob))
 
-    if cfg.equalization.prob:
-        augmentations.append(transforms.RandomApply([Equalization()], p=cfg.equalization.prob))
+        if cfg.equalization.prob:
+            augmentations.append(transforms.RandomApply([Equalization()], p=cfg.equalization.prob))
 
-    if cfg.horizontal_flip.prob:
-        augmentations.append(transforms.RandomHorizontalFlip(p=cfg.horizontal_flip.prob))
+        if cfg.horizontal_flip.prob:
+            augmentations.append(transforms.RandomHorizontalFlip(p=cfg.horizontal_flip.prob))
 
-    augmentations.append(transforms.ToTensor())
-    augmentations.append(transforms.Normalize(mean=mean, std=std))
+        augmentations.append(transforms.ToTensor())
+        augmentations.append(transforms.Normalize(mean=mean, std=std))
 
     augmentations = transforms.Compose(augmentations)
     return augmentations
